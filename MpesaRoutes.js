@@ -2,6 +2,7 @@ import express from "express";
 import axios from "axios";
 import dotenv from "dotenv";
 import { supabase} from "./Client.js";
+import { updateProject } from "./supabase.js";
 dotenv.config();
 
 const router = express.Router();
@@ -298,7 +299,7 @@ router.post("/query-stk", async (req, res) => {
  */
 router.post("/b2c-payment", async (req, res) => {
   try {
-    const { phoneNumber, amount, remarks, occasion } = req.body;
+    const { phoneNumber,transaction,finalProjectId, amount, remarks, occasion } = req.body;
 
     // Validation
     if (!phoneNumber || !amount) {
@@ -347,6 +348,26 @@ router.post("/b2c-payment", async (req, res) => {
         },
       }
     );
+ // 3. Update transaction
+      await supabase
+        .from("transactions")
+        .update({
+          status: "released",
+          mpesa_conversation_id: response.data.conversationID,
+        })
+        .eq("id", transaction.id);
+
+        //update projects
+        if (finalProjectId) {
+              const { data: projectData, error: projectError } = await updateProject(finalProjectId);
+              
+              if (projectError) {
+                console.error("Project update failed:", projectError);
+               
+              } else {
+                console.log("Project status updated to completed:", projectData);
+              }
+            }
 
     res.status(200).json({
       status: "success",
