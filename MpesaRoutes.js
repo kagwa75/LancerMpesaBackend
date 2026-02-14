@@ -7,6 +7,14 @@ dotenv.config();
 
 const router = express.Router();
 
+// Access token cache shared across requests
+const ACCESS_TOKEN_BUFFER_MS = 60 * 1000; // refresh 1 minute early
+const accessTokenCache = {
+  token: null,
+  expiresAt: 0,
+  inFlight: null,
+};
+
 // M-Pesa Configuration
 const MPESA_CONFIG = {
   consumerKey: process.env.MPESA_CONSUMER_KEY,
@@ -33,26 +41,50 @@ const CALLBACK_BASE_URL = process.env.CALLBACK_BASE_URL || "https://yourdomain.c
  * Generate M-Pesa Access Token
  */
 const generateAccessToken = async () => {
-  try {
-    const auth = Buffer.from(
-      `${MPESA_CONFIG.consumerKey}:${MPESA_CONFIG.consumerSecret}`
-    ).toString("base64");
-
-    const response = await axios.get(
-      `${BASE_URL}/oauth/v1/generate?grant_type=client_credentials`,
-      {
-        headers: {
-          Authorization: `Basic ${auth}`,
-        },
-      }
-    );
-    console.log("response token:", response);
-
-    return response.data.access_token;
-  } catch (error) {
-    console.error("Access Token Error:", error.response?.data || error.message);
-    throw new Error("Failed to generate access token");
+  const now = Date.now();
+  if (accessTokenCache.token && accessTokenCache.expiresAt > now) {
+    return accessTokenCache.token;
   }
+
+  if (accessTokenCache.inFlight) {
+    return accessTokenCache.inFlight;
+  }
+
+  accessTokenCache.inFlight = (async () => {
+    try {
+      const auth = Buffer.from(
+        `${MPESA_CONFIG.consumerKey}:${MPESA_CONFIG.consumerSecret}`
+      ).toString("base64");
+
+      const response = await axios.get(
+        `${BASE_URL}/oauth/v1/generate?grant_type=client_credentials`,
+        {
+          headers: {
+            Authorization: `Basic ${auth}`,
+          },
+        }
+      );
+
+      const { access_token, expires_in } = response.data || {};
+      if (!access_token) {
+        throw new Error("Access token missing in response");
+      }
+
+      const ttlMs = (Number(expires_in) || 3599) * 1000;
+      accessTokenCache.token = access_token;
+      accessTokenCache.expiresAt = Date.now() + ttlMs - ACCESS_TOKEN_BUFFER_MS;
+      return access_token;
+    } catch (error) {
+      accessTokenCache.token = null;
+      accessTokenCache.expiresAt = 0;
+      console.error("Access Token Error:", error.response?.data || error.message);
+      throw new Error("Failed to generate access token");
+    } finally {
+      accessTokenCache.inFlight = null;
+    }
+  })();
+
+  return accessTokenCache.inFlight;
 };
 
 /**

@@ -1,4 +1,4 @@
 export const SUPABASE_URL = "https://fdddvxvmkeqyufdrvcbc.supabase.co";
-export const SUPABASE_PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY;
+export const SUPABASE_PUBLISHABLE_KEY ="sb_publishable_xImLeAhhXyoXYJJzJUeGtQ_XHvs3Xkf";
 export const stripeKey = process.env.STRIPE_SECRET_KEY;
-export const SUPABASE_SERVICE_ROLE_KEY =process.env.SUPABASE_SERVICE_ROLE_KEY;
+export const SUPABASE_SERVICE_ROLE_KEY ="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZkZGR2eHZta2VxeXVmZHJ2Y2JjIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2NzU5OTQ4OCwiZXhwIjoyMDgzMTc1NDg4fQ.FGLtF3XDfjXlLAmctVarRLwDyejSgHl3RPEz4gRY2HM";
