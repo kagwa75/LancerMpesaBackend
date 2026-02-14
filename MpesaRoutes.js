@@ -12,26 +12,33 @@ const router = express.Router();
 // ==================== RATE LIMITING ====================
 // M-Pesa allows 5 requests per 60 seconds - we use 4 to be safe
 const mpesaQueryLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 4, // 4 requests per minute
-  message: {
-    status: "error",
-    message: "Too many requests. Please wait before trying again.",
-    retryAfter: 60,
-  },
+  windowMs: 60 * 1000, // 1 minute window
+  max: 4, // Max 4 requests per window
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => {
-    return req.ip || req.connection.remoteAddress || "anonymous";
+  // Skip the keyGenerator - let express-rate-limit handle it properly
+  handler: (req, res) => {
+    console.warn("⚠️ Rate limit hit for query endpoint");
+    res.status(429).json({
+      status: "error",
+      message: "Too many requests. Please wait 60 seconds before trying again.",
+      error: "TOO_MANY_REQUESTS",
+      retryAfter: 60,
+    });
   },
 });
 
 const mpesaStkLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 3,
-  message: {
-    status: "error",
-    message: "Too many payment requests. Please wait.",
+  max: 3, // Max 3 STK pushes per minute
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res) => {
+    console.warn("⚠️ Rate limit hit for STK push");
+    res.status(429).json({
+      status: "error",
+      message: "Too many payment requests. Please wait before trying again.",
+    });
   },
 });
 
@@ -42,7 +49,19 @@ const accessTokenCache = {
   expiresAt: 0,
   inFlight: null,
 };
+// Add this near the top with other caches
+const queryResultCache = new Map();
+const QUERY_CACHE_TTL = 10000; // Cache for 10 seconds
 
+// Helper to clean old cache entries
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, value] of queryResultCache.entries()) {
+    if (now > value.expiresAt) {
+      queryResultCache.delete(key);
+    }
+  }
+}, 30000); // Clean every 30 seconds
 // ==================== M-PESA CONFIGURATION ====================
 const MPESA_CONFIG = {
   consumerKey: process.env.MPESA_CONSUMER_KEY,
@@ -322,7 +341,18 @@ router.post("/query-stk",mpesaQueryLimiter, async (req, res) => {
         message: "CheckoutRequestID is required",
       });
     }
+// Check cache first
+    const cachedResult = queryResultCache.get(checkoutRequestID);
+    if (cachedResult && Date.now() < cachedResult.expiresAt) {
+      console.log(`💾 Returning cached result for: ${checkoutRequestID.slice(-10)}`);
+      return res.status(200).json({
+        status: "success",
+        data: cachedResult.data,
+        cached: true,
+      });
+    }
 
+    console.log(`🔍 Querying M-Pesa: ${checkoutRequestID.slice(-10)}`);
     const accessToken = await generateAccessToken();
     const { password, timestamp } = generatePassword();
 
@@ -341,9 +371,24 @@ router.post("/query-stk",mpesaQueryLimiter, async (req, res) => {
           Authorization: `Bearer ${accessToken}`,
           "Content-Type": "application/json",
         },
+        timeout: 15000,
       }
     );
-
+      const resultCode = response.data.ResultCode;
+    console.log(`📊 Query result: ${resultCode || "Pending"}`);
+  // Cache the result
+    queryResultCache.set(checkoutRequestID, {
+      data: response.data,
+      expiresAt: Date.now() + QUERY_CACHE_TTL,
+    });
+    // If transaction is complete (success or failure), cache longer
+    if (resultCode === "0" || resultCode === 0 || 
+        (resultCode && resultCode !== "0" && resultCode !== 0)) {
+      queryResultCache.set(checkoutRequestID, {
+        data: response.data,
+        expiresAt: Date.now() + (5 * 60 * 1000), // Cache for 5 minutes
+      });
+    }
     res.status(200).json({
       status: "success",
       data: response.data,
