@@ -1,13 +1,41 @@
 import express from "express";
 import axios from "axios";
 import dotenv from "dotenv";
-import { supabase} from "./Client.js";
+import rateLimit from "express-rate-limit";
+import { supabase } from "./Client.js";
 import { updateProject } from "./supabase.js";
+
 dotenv.config();
 
 const router = express.Router();
 
-// Access token cache shared across requests
+// ==================== RATE LIMITING ====================
+// M-Pesa allows 5 requests per 60 seconds - we use 4 to be safe
+const mpesaQueryLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 4, // 4 requests per minute
+  message: {
+    status: "error",
+    message: "Too many requests. Please wait before trying again.",
+    retryAfter: 60,
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => {
+    return req.ip || req.connection.remoteAddress || "anonymous";
+  },
+});
+
+const mpesaStkLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 3,
+  message: {
+    status: "error",
+    message: "Too many payment requests. Please wait.",
+  },
+});
+
+// ==================== ACCESS TOKEN CACHE ====================
 const ACCESS_TOKEN_BUFFER_MS = 60 * 1000; // refresh 1 minute early
 const accessTokenCache = {
   token: null,
@@ -15,43 +43,49 @@ const accessTokenCache = {
   inFlight: null,
 };
 
-// M-Pesa Configuration
+// ==================== M-PESA CONFIGURATION ====================
 const MPESA_CONFIG = {
   consumerKey: process.env.MPESA_CONSUMER_KEY,
   consumerSecret: process.env.MPESA_CONSUMER_SECRET,
-  shortCode: process.env.MPESA_SHORTCODE, // Your business shortcode
-  passKey: process.env.MPESA_PASSKEY, // For STK Push
-  initiatorName: process.env.MPESA_INITIATOR_NAME, // For B2C
-  securityCredential: process.env.MPESA_SECURITY_CREDENTIAL, // For B2C
-  environment: process.env.MPESA_ENVIRONMENT || "sandbox", // 'sandbox' or 'production'
+  shortCode: process.env.MPESA_SHORTCODE,
+  passKey: process.env.MPESA_PASSKEY,
+  initiatorName: process.env.MPESA_INITIATOR_NAME,
+  securityCredential: process.env.MPESA_SECURITY_CREDENTIAL,
+  environment: process.env.MPESA_ENVIRONMENT || "sandbox",
 };
 
-// Base URLs
 const BASE_URL =
   MPESA_CONFIG.environment === "production"
     ? "https://api.safaricom.co.ke"
     : "https://sandbox.safaricom.co.ke";
 
-// Callback URLs - Replace with your actual URLs
-const CALLBACK_BASE_URL = process.env.CALLBACK_BASE_URL || "https://yourdomain.com/mpesa";
+const CALLBACK_BASE_URL =
+  process.env.CALLBACK_BASE_URL || "https://yourdomain.com/mpesa";
 
 // ==================== UTILITY FUNCTIONS ====================
 
 /**
- * Generate M-Pesa Access Token
+ * Generate M-Pesa Access Token with caching
  */
 const generateAccessToken = async () => {
   const now = Date.now();
+  
+  // Return cached token if still valid
   if (accessTokenCache.token && accessTokenCache.expiresAt > now) {
+    console.log("✅ Using cached access token");
     return accessTokenCache.token;
   }
 
+  // Wait for in-flight request if one exists
   if (accessTokenCache.inFlight) {
+    console.log("⏳ Waiting for in-flight token request");
     return accessTokenCache.inFlight;
   }
 
+  // Generate new token
   accessTokenCache.inFlight = (async () => {
     try {
+      console.log("🔄 Generating new access token...");
       const auth = Buffer.from(
         `${MPESA_CONFIG.consumerKey}:${MPESA_CONFIG.consumerSecret}`
       ).toString("base64");
@@ -62,6 +96,7 @@ const generateAccessToken = async () => {
           headers: {
             Authorization: `Basic ${auth}`,
           },
+          timeout: 10000,
         }
       );
 
@@ -73,11 +108,13 @@ const generateAccessToken = async () => {
       const ttlMs = (Number(expires_in) || 3599) * 1000;
       accessTokenCache.token = access_token;
       accessTokenCache.expiresAt = Date.now() + ttlMs - ACCESS_TOKEN_BUFFER_MS;
+
+      console.log(`✅ Token cached, expires in ${Math.round(ttlMs / 1000)}s`);
       return access_token;
     } catch (error) {
       accessTokenCache.token = null;
       accessTokenCache.expiresAt = 0;
-      console.error("Access Token Error:", error.response?.data || error.message);
+      console.error("❌ Access Token Error:", error.response?.data || error.message);
       throw new Error("Failed to generate access token");
     } finally {
       accessTokenCache.inFlight = null;
@@ -86,7 +123,6 @@ const generateAccessToken = async () => {
 
   return accessTokenCache.inFlight;
 };
-
 /**
  * Generate Password for STK Push
  */
@@ -128,7 +164,7 @@ const formatPhoneNumber = (phone) => {
  * @desc    Initiate STK Push to client's phone for payment
  * @access  Public
  */
-router.post("/stk-push", async (req, res) => {
+router.post("/stk-push", mpesaStkLimiter, async (req, res) => {
   try {
     const { phoneNumber, amount, accountReference, transactionDesc } = req.body;
 
@@ -276,7 +312,7 @@ router.post("/callback/stk-push", async (req, res) => {
  * @desc    Query the status of an STK Push transaction
  * @access  Public
  */
-router.post("/query-stk", async (req, res) => {
+router.post("/query-stk",mpesaQueryLimiter, async (req, res) => {
   try {
     const { checkoutRequestID } = req.body;
 
