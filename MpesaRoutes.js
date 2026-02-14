@@ -446,10 +446,11 @@ router.post("/b2c-payment", async (req, res) => {
 
     // Format phone number
     const formattedPhone = formatPhoneNumber(phoneNumber);
+const originatorConversationID = `B2C_${transaction?.id || "TX"}_${Date.now()}`;
 
     // B2C payload
     const b2cPayload = {
-       OriginatorConversationID: "600997_Test_32et3241ed8yu", 
+       OriginatorConversationID: originatorConversationID, 
       InitiatorName: MPESA_CONFIG.initiatorName,
       SecurityCredential: MPESA_CONFIG.securityCredential,
       CommandID: "BusinessPayment", // or "SalaryPayment" or "PromotionPayment"
@@ -477,7 +478,7 @@ router.post("/b2c-payment", async (req, res) => {
       await supabase
         .from("transactions")
         .update({
-          status: "released",
+          status: "processing_release",
           mpesa_conversation_id: response.data.conversationID,
         })
         .eq("id", transaction.id);
