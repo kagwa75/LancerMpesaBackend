@@ -27,7 +27,7 @@ app.use(express.urlencoded({ extended: true })); // Parse URL-encoded request bo
 
 // Routes
 app.use("/mpesa", MpesaRoutes);
-
+app.set("trust proxy", 1); // Trust first proxy
 // Basic health check route
 app.get("/", (req, res) => {
   res.status(200).json({
