@@ -359,7 +359,7 @@ router.post("/query-stk",mpesaQueryLimiter, async (req, res) => {
     const queryPayload = {
       BusinessShortCode: MPESA_CONFIG.shortCode,
       Password: "MTc0Mzc5YmZiMjc5ZjlhYTliZGJjZjE1OGU5N2RkNzFhNDY3Y2QyZTBjODkzMDU5YjEwZjc4ZTZiNzJhZGExZWQyYzkxOTIwMjEwNjI4MDkyNDA4",
-      Timestamp: "20160216165627",
+      Timestamp: "20210628092408",
       CheckoutRequestID: checkoutRequestID,
     };
 
