@@ -11,7 +11,7 @@ const app = express();
 
 // Set the port (use environment variable or default to 3000)
 const PORT = process.env.PORT || 4000;
-
+app.set("trust proxy", 1); // Trust first proxy
 // Middleware
 app.use(
   cors({
@@ -27,7 +27,7 @@ app.use(express.urlencoded({ extended: true })); // Parse URL-encoded request bo
 
 // Routes
 app.use("/mpesa", MpesaRoutes);
-app.set("trust proxy", 1); // Trust first proxy
+
 // Basic health check route
 app.get("/", (req, res) => {
   res.status(200).json({
