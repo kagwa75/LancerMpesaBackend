@@ -348,12 +348,24 @@ router.post("/query-stk",mpesaQueryLimiter, async (req, res) => {
       status: "success",
       data: response.data,
     });
-  } catch (error) {
-    console.error("Query STK Error:", error.response?.data || error.message);
+  }catch (error) {
+    console.error("❌ Query STK Error:", error.response?.data || error.message);
+
+    // Handle rate limiting specifically
+    const fault = error.response?.data?.fault;
+    if (fault?.detail?.errorcode === "policies.ratelimit.SpikeArrestViolation") {
+      console.warn("⚠️ Rate limit exceeded");
+      return res.status(429).json({
+        status: "error",
+        message: "Rate limit exceeded. Please wait 60 seconds.",
+        error: "TOO_MANY_REQUESTS",
+      });
+    }
+
     res.status(500).json({
       status: "error",
       message: "Failed to query transaction",
-      error: error.response?.data || error.message,
+      error: error.response?.data?.errorMessage || error.message,
     });
   }
 });
